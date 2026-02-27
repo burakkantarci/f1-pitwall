@@ -1,0 +1,6 @@
+services:
+  otel-collector:
+    environment:
+      - DD_API_KEY=${DD_API_KEY:-}
+    volumes:
+      - ./otel/otel-collector-config.yml:/etc/otel-collector-config.yml
