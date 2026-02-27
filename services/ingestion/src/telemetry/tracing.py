@@ -23,7 +23,7 @@ def setup_telemetry(service_name: str = "pitwall-ingestion"):
     provider.add_span_processor(BatchSpanProcessor(exporter))
     trace.set_tracer_provider(provider)
 
-    FastAPIInstrumentor.instrument()
+    FastAPIInstrumentor().instrument()
     SQLAlchemyInstrumentor().instrument()
     RedisInstrumentor().instrument()
     HTTPXClientInstrumentor().instrument()
