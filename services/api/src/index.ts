@@ -32,6 +32,22 @@ await app.register(sessionsRoutes, { prefix: '/api' });
 await app.register(liveRoutes, { prefix: '/api' });
 await app.register(chaosRoutes, { prefix: '/api' });
 
+// Admin - replay proxy to ingestion service
+app.post<{ Body: { session_id: number; speed: number } }>('/api/admin/replay', async (req) => {
+  const { session_id, speed } = req.body;
+  const ingestionUrl = process.env.INGESTION_URL || 'http://ingestion:8000';
+  const res = await fetch(`${ingestionUrl}/replay?session_id=${session_id}&speed=${speed}`, {
+    method: 'POST',
+  });
+  return res.json();
+});
+
+app.post('/api/admin/replay/stop', async () => {
+  const ingestionUrl = process.env.INGESTION_URL || 'http://ingestion:8000';
+  const res = await fetch(`${ingestionUrl}/replay/stop`, { method: 'POST' });
+  return res.json();
+});
+
 // WebSocket
 await app.register(wsHandler);
 
