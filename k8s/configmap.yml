@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pitwall-config
+  namespace: pitwall
+data:
+  POSTGRES_DB: pitwall
+  POSTGRES_USER: pitwall
+  DATABASE_URL: postgresql://pitwall:pitwall_dev@postgres:5432/pitwall
+  REDIS_URL: redis://redis:6379
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://opentelemetry-kube-stack-daemon-collector.opentelemetry-operator-system.svc.cluster.local:4318
+  OPENF1_BASE_URL: https://api.openf1.org/v1
+  ERGAST_BASE_URL: https://api.jolpi.ca/ergast/f1
+  VITE_API_URL: http://localhost:3001
+  VITE_WS_URL: ws://localhost:3001
+  INGESTION_URL: http://ingestion:8000

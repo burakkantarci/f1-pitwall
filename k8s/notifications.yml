@@ -1,0 +1,34 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: notifications
+  namespace: pitwall
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: notifications
+  template:
+    metadata:
+      labels:
+        app: notifications
+      annotations:
+        instrumentation.opentelemetry.io/inject-nodejs: "opentelemetry-operator-system/elastic-instrumentation"
+    spec:
+      containers:
+        - name: notifications
+          image: pitwall-notifications:latest
+          imagePullPolicy: Never
+          env:
+            - name: SERVICE_NAME
+              value: pitwall-notifications
+            - name: REDIS_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: pitwall-config
+                  key: REDIS_URL
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              valueFrom:
+                configMapKeyRef:
+                  name: pitwall-config
+                  key: OTEL_EXPORTER_OTLP_ENDPOINT
