@@ -12,8 +12,6 @@ spec:
     metadata:
       labels:
         app: ingestion
-      annotations:
-        instrumentation.opentelemetry.io/inject-python: "opentelemetry-operator-system/elastic-instrumentation"
     spec:
       containers:
         - name: ingestion

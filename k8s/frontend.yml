@@ -12,8 +12,6 @@ spec:
     metadata:
       labels:
         app: frontend
-      annotations:
-        instrumentation.opentelemetry.io/inject-nodejs: "opentelemetry-operator-system/elastic-instrumentation"
     spec:
       containers:
         - name: frontend
