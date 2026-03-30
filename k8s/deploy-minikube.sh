@@ -3,7 +3,6 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
-CLUSTER_NAME="pitwall"
 NAMESPACE="pitwall"
 
 # Colors for output
@@ -33,46 +32,38 @@ wait_for_job() {
 # -------------------------------------------------------------------
 # Pre-flight checks
 # -------------------------------------------------------------------
-command -v docker >/dev/null 2>&1 || err "docker is not installed"
-command -v kind >/dev/null 2>&1   || err "kind is not installed — run: brew install kind"
-command -v kubectl >/dev/null 2>&1 || err "kubectl is not installed"
-command -v helm >/dev/null 2>&1   || err "helm is not installed — run: brew install helm"
+command -v docker >/dev/null 2>&1   || err "docker is not installed"
+command -v minikube >/dev/null 2>&1  || err "minikube is not installed - run: brew install minikube"
+command -v kubectl >/dev/null 2>&1   || err "kubectl is not installed"
 
 docker info >/dev/null 2>&1 || err "Docker daemon is not running"
 
 # -------------------------------------------------------------------
-# Step 1: Create kind cluster (skip if already exists)
+# Step 1: Start minikube (skip if already running)
 # -------------------------------------------------------------------
-if kind get clusters 2>/dev/null | grep -q "^${CLUSTER_NAME}$"; then
-  log "Kind cluster '$CLUSTER_NAME' already exists"
+if minikube status --format='{{.Host}}' 2>/dev/null | grep -q "Running"; then
+  log "minikube is already running"
 else
-  log "Creating kind cluster '$CLUSTER_NAME'..."
-  kind create cluster --name "$CLUSTER_NAME" --config "$SCRIPT_DIR/kind-config.yml"
+  log "Starting minikube..."
+  minikube start --driver=docker --cpus=4 --memory=8192
 fi
 
-kubectl cluster-info --context "kind-${CLUSTER_NAME}" >/dev/null 2>&1 || err "Cannot connect to cluster"
-kubectl config use-context "kind-${CLUSTER_NAME}"
+kubectl cluster-info >/dev/null 2>&1 || err "Cannot connect to cluster"
 
 # -------------------------------------------------------------------
-# Step 2: Build Docker images
+# Step 2: Build Docker images inside minikube's Docker daemon
 # -------------------------------------------------------------------
-log "Building Docker images..."
+log "Configuring Docker to use minikube's daemon..."
+eval $(minikube docker-env)
+
+log "Building Docker images (native arm64 on Apple Silicon)..."
 docker build -t pitwall-api:latest       "$PROJECT_DIR/services/api"
 docker build -t pitwall-ingestion:latest "$PROJECT_DIR/services/ingestion"
 docker build -t pitwall-notifications:latest "$PROJECT_DIR/services/notifications"
 docker build -t pitwall-frontend:latest  "$PROJECT_DIR/frontend"
 
 # -------------------------------------------------------------------
-# Step 3: Load images into kind
-# -------------------------------------------------------------------
-log "Loading images into kind cluster..."
-kind load docker-image pitwall-api:latest       --name "$CLUSTER_NAME"
-kind load docker-image pitwall-ingestion:latest --name "$CLUSTER_NAME"
-kind load docker-image pitwall-notifications:latest --name "$CLUSTER_NAME"
-kind load docker-image pitwall-frontend:latest  --name "$CLUSTER_NAME"
-
-# -------------------------------------------------------------------
-# Step 4: Apply base resources
+# Step 3: Apply base resources
 # -------------------------------------------------------------------
 log "Creating namespace and config..."
 kubectl apply -f "$SCRIPT_DIR/namespace.yml"
@@ -80,61 +71,42 @@ kubectl apply -f "$SCRIPT_DIR/configmap.yml"
 kubectl apply -f "$SCRIPT_DIR/secrets.yml"
 
 # -------------------------------------------------------------------
-# Step 5: Deploy PostgreSQL and wait
+# Step 4: Deploy PostgreSQL and wait
 # -------------------------------------------------------------------
 log "Deploying PostgreSQL..."
 kubectl apply -f "$SCRIPT_DIR/postgres.yml"
 wait_for_ready "app=postgres" 120
 
 # -------------------------------------------------------------------
-# Step 6: Deploy Redis and wait
+# Step 5: Deploy Redis and wait
 # -------------------------------------------------------------------
 log "Deploying Redis..."
 kubectl apply -f "$SCRIPT_DIR/redis.yml"
 wait_for_ready "app=redis" 60
 
 # -------------------------------------------------------------------
-# Step 7: Run DB migration
+# Step 6: Run DB migration
 # -------------------------------------------------------------------
 log "Running database migration..."
 
-# Create migration configmap from SQL file
 kubectl create configmap db-migrations \
   --namespace "$NAMESPACE" \
   --from-file="001_initial.sql=$PROJECT_DIR/database/migrations/001_initial.sql" \
   --dry-run=client -o yaml | kubectl apply -f -
 
-# Delete previous migration job if it exists
 kubectl delete job db-migrate --namespace "$NAMESPACE" --ignore-not-found=true
-
 kubectl apply -f "$SCRIPT_DIR/db-migrate.yml"
 wait_for_job "db-migrate" 60
 
 # -------------------------------------------------------------------
-# Step 8: Deploy Elastic OTel kube-stack (operator + collectors)
+# Step 7: Deploy OTel Collector
 # -------------------------------------------------------------------
-log "Setting up Elastic OpenTelemetry stack..."
-helm repo add open-telemetry 'https://open-telemetry.github.io/opentelemetry-helm-charts' --force-update 2>/dev/null
-
-kubectl create namespace opentelemetry-operator-system 2>/dev/null || true
-
-kubectl create secret generic elastic-secret-otel \
-  --namespace opentelemetry-operator-system \
-  --from-literal=elastic_otlp_endpoint="${ELASTIC_OTLP_ENDPOINT}" \
-  --from-literal=elastic_api_key="${ELASTIC_API_KEY}" \
-  --dry-run=client -o yaml | kubectl apply -f -
-
-helm upgrade --install opentelemetry-kube-stack open-telemetry/opentelemetry-kube-stack \
-  --namespace opentelemetry-operator-system \
-  --values 'https://raw.githubusercontent.com/elastic/elastic-agent/refs/tags/v9.3.1/deploy/helm/edot-collector/kube-stack/managed_otlp/values.yaml' \
-  --version '0.12.4' \
-  --wait --timeout 180s
-
-log "Waiting for OTel operator pods..."
-kubectl wait --namespace opentelemetry-operator-system --for=condition=ready pod --all --timeout=180s
+log "Deploying OpenTelemetry Collector..."
+kubectl apply -f "$SCRIPT_DIR/otel-collector.yml"
+wait_for_ready "app=otel-collector" 60
 
 # -------------------------------------------------------------------
-# Step 9: Deploy application services
+# Step 8: Deploy application services
 # -------------------------------------------------------------------
 log "Deploying application services..."
 kubectl apply -f "$SCRIPT_DIR/api.yml"
@@ -143,7 +115,7 @@ kubectl apply -f "$SCRIPT_DIR/notifications.yml"
 kubectl apply -f "$SCRIPT_DIR/frontend.yml"
 
 # -------------------------------------------------------------------
-# Step 10: Wait for all deployments
+# Step 9: Wait for all deployments
 # -------------------------------------------------------------------
 log "Waiting for all deployments to be ready..."
 kubectl rollout status deployment/api           --namespace "$NAMESPACE" --timeout=120s
@@ -152,16 +124,52 @@ kubectl rollout status deployment/notifications --namespace "$NAMESPACE" --timeo
 kubectl rollout status deployment/frontend      --namespace "$NAMESPACE" --timeout=120s
 
 # -------------------------------------------------------------------
+# Step 10: Seed data
+# -------------------------------------------------------------------
+log "Seeding 2024 season data..."
+
+INGESTION_POD=$(kubectl get pod -n "$NAMESPACE" -l app=ingestion -o jsonpath='{.items[0].metadata.name}')
+kubectl port-forward -n "$NAMESPACE" "pod/$INGESTION_POD" 8000:8000 &
+PF_PID=$!
+sleep 2
+
+curl -sf -X POST http://localhost:8000/sync/season/2024 || warn "Seed request failed - you can retry manually"
+
+# Poll until data appears (max 60s)
+log "Waiting for seed data..."
+for i in $(seq 1 30); do
+  COUNT=$(kubectl exec -n "$NAMESPACE" statefulset/postgres -- \
+    psql -U pitwall -d pitwall -t -c "SELECT COUNT(*) FROM races;" 2>/dev/null | tr -d ' ')
+  if [ -n "$COUNT" ] && [ "$COUNT" -gt 0 ] 2>/dev/null; then
+    log "Found $COUNT races in database."
+    break
+  fi
+  printf "."
+  sleep 2
+done
+echo ""
+
+kill $PF_PID 2>/dev/null || true
+
+# -------------------------------------------------------------------
 # Done
 # -------------------------------------------------------------------
 echo ""
-log "PitWall is running on Kubernetes!"
+log "PitWall is running on minikube!"
 echo ""
-echo "  Frontend:   http://localhost:5173"
-echo "  API:        http://localhost:3001"
-echo "  Ingestion:  http://localhost:8000"
-echo ""
-echo "  Seed data:  curl -X POST http://localhost:8000/sync/season/2024"
+
+API_URL=$(minikube service api -n "$NAMESPACE" --url 2>/dev/null || echo "http://localhost:3001")
+FRONTEND_URL=$(minikube service frontend -n "$NAMESPACE" --url 2>/dev/null || echo "http://localhost:5173")
+INGESTION_URL=$(minikube service ingestion -n "$NAMESPACE" --url 2>/dev/null || echo "http://localhost:8000")
+
+echo "  Frontend:   $FRONTEND_URL"
+echo "  API:        $API_URL"
+echo "  Ingestion:  $INGESTION_URL"
 echo ""
 echo "  kubectl get pods -n pitwall"
+echo ""
+echo "Next steps:"
+echo "  1. Install Edge Delta agent:  ./k8s/edge-delta.sh"
+echo "  2. Generate traffic:          ./scripts/generate-traffic.sh"
+echo "  3. Trigger chaos:             ./scripts/chaos.sh redis-kill"
 echo ""

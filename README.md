@@ -1,57 +1,124 @@
-# PitWall
+# When Kubernetes Apps Break: Agentic SRE in Action
 
-Real-time F1 race data platform with live telemetry, race tracking, and notifications.
+A hands-on workshop where you deploy a real-time F1 race data platform on minikube, intentionally break it with cascading failures, and use Edge Delta's agentic SRE workflows to investigate - instead of manually digging through logs.
+
+## What You'll Learn
+
+- Deploy a multi-service application (PitWall) to a local Kubernetes cluster
+- Trigger real-world failure patterns: database outages, Redis kills, cascading service failures
+- Use Edge Delta's agentic investigation threads to analyze and troubleshoot issues
+- Ask follow-up questions about operational signals instead of manually searching logs
 
 ## Architecture
 
-- **Frontend** — React + TypeScript + Tailwind CSS (Vite). Live dashboard, race calendar, driver standings, and admin panel.
-- **API** — Fastify (TypeScript). REST endpoints and WebSocket for live position updates. PostgreSQL + Redis caching.
-- **Ingestion** — Python service that pulls data from OpenF1 and Ergast APIs. Handles historical sync, live polling, and race replay.
-- **Notifications** — TypeScript service with event-driven handlers for position changes, pit stops, fastest laps, and safety cars.
-- **Infrastructure** — Docker Compose for local dev. Kubernetes manifests in `k8s/`. OpenTelemetry collector for observability.
+PitWall is a 4-service F1 telemetry platform with PostgreSQL, Redis, and an OpenTelemetry collector:
+
+```
+                    +-----------+
+                    | Frontend  |
+                    | (React)   |
+                    +-----+-----+
+                          |
+                    REST + WebSocket
+                          |
+                    +-----+-----+
+                    |    API    |
+                    | (Fastify) |
+                    +--+-----+--+
+                       |     |
+            +----------+     +----------+
+            |                           |
+      +-----+-----+            +-------+------+
+      | PostgreSQL |            |    Redis     |
+      +-----+-----+            +---+------+---+
+            |                       |      |
+      +-----+-----+         +------+  +---+----------+
+      | Ingestion  +---------+        | Notifications |
+      | (Python)   | pub/sub          | (Node.js)     |
+      +------------+                  +--------------+
+```
+
+See [Architecture](docs/architecture.md) for details.
+
+## Prerequisites
+
+| Tool | Install |
+|------|---------|
+| Docker Desktop | [docker.com](https://www.docker.com/products/docker-desktop/) |
+| minikube | `brew install minikube` |
+| kubectl | `brew install kubectl` or included with Docker Desktop |
+| Git | `brew install git` |
+
+No prior experience with AI-driven or agentic systems is required.
+
+## Quick Start
+
+```bash
+# Clone and deploy
+git clone https://github.com/emrahssamdan-edge/f1-pitwall.git
+cd f1-pitwall
+
+# Deploy to minikube (builds images, applies manifests, seeds data)
+./k8s/deploy-minikube.sh
+
+# Install Edge Delta agent (get API key from https://app.edgedelta.com)
+ED_API_KEY=your-key-here ./k8s/edge-delta.sh
+
+# Generate baseline traffic
+./scripts/generate-traffic.sh
+
+# Break things
+./scripts/chaos.sh redis-kill       # Kill Redis - partial failure
+./scripts/chaos.sh meltdown         # Total system degradation
+./scripts/chaos.sh meltdown-restore # Bring it all back
+```
+
+## Workshop Guide
+
+Follow the step-by-step [Workshop Guide](docs/workshop-guide.md) for the full 30-minute session.
+
+## Failure Scenarios
+
+See [Failure Scenarios](docs/failure-scenarios.md) for all available chaos scenarios and their expected effects.
 
 ## Tech Stack
 
-| Layer         | Technology                        |
-|---------------|-----------------------------------|
-| Frontend      | React, TypeScript, Vite, Tailwind |
-| API           | Fastify, TypeScript               |
-| Ingestion     | Python                            |
-| Notifications | TypeScript                        |
-| Database      | PostgreSQL                        |
-| Cache         | Redis                             |
-| Observability | OpenTelemetry                     |
-| Orchestration | Docker Compose, Kubernetes        |
-
-## Getting Started
-
-1. Copy the environment file:
-   ```sh
-   cp .env.example .env
-   ```
-
-2. Start all services:
-   ```sh
-   docker compose -f docker-compose.otel.yml up --build
-   ```
-
-3. The frontend is available at `http://localhost:5173` and the API at `http://localhost:3001`.
+| Layer | Technology |
+|-------|-----------|
+| Frontend | React, TypeScript, Vite, Tailwind |
+| API | Fastify, TypeScript |
+| Ingestion | Python, FastAPI |
+| Notifications | TypeScript, ioredis |
+| Database | PostgreSQL 16 |
+| Cache/PubSub | Redis 7 |
+| Observability | OpenTelemetry, structured JSON logging (Pino/Structlog) |
+| Orchestration | minikube, Kubernetes |
 
 ## Project Structure
 
 ```
 services/
-  api/          — REST API + WebSocket server
-  ingestion/    — Data ingestion from F1 APIs
-  notifications/ — Event-driven notification handlers
-frontend/       — React SPA
+  api/            - REST API + WebSocket server + chaos engineering endpoints
+  ingestion/      - Data ingestion from F1 APIs + race replay engine
+  notifications/  - Event-driven notification handlers via Redis pub/sub
+frontend/         - React SPA with live race dashboard
 database/
-  migrations/   — SQL migrations
-k8s/            — Kubernetes manifests
-scripts/        — Replay and chaos testing scripts
+  migrations/     - SQL schema
+k8s/              - Kubernetes manifests + deployment scripts
+scripts/          - Chaos, traffic generation, replay, and seed scripts
+docs/             - Workshop guide, failure scenarios, architecture
 ```
 
-## Data Sources
+## Cleanup
 
-- [OpenF1 API](https://api.openf1.org/v1) — Live and historical session data
-- [Ergast API](https://api.jolpi.ca/ergast/f1) — Race results and standings
+```bash
+helm uninstall edgedelta -n edgedelta 2>/dev/null
+kubectl delete namespace pitwall edgedelta 2>/dev/null
+minikube stop
+```
+
+## Resources
+
+- [Edge Delta](https://www.edgedelta.com) - Agentic observability platform
+- [OpenF1 API](https://api.openf1.org/v1) - Live and historical F1 session data
+- [Ergast API](https://api.jolpi.ca/ergast/f1) - Race results and standings

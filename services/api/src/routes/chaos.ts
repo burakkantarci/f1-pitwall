@@ -8,6 +8,8 @@ interface ChaosState {
   errors: { active: boolean; rate: number; timer?: ReturnType<typeof setTimeout> };
   memoryLeak: { active: boolean; data: unknown[] };
   dbSlow: { active: boolean; delay_ms: number; timer?: ReturnType<typeof setTimeout> };
+  dbPoolExhaust: { active: boolean; clients: unknown[]; timer?: ReturnType<typeof setTimeout> };
+  redisFlood: { active: boolean; interval?: ReturnType<typeof setInterval>; timer?: ReturnType<typeof setTimeout> };
 }
 
 const chaos: ChaosState = {
@@ -15,6 +17,8 @@ const chaos: ChaosState = {
   errors: { active: false, rate: 0 },
   memoryLeak: { active: false, data: [] },
   dbSlow: { active: false, delay_ms: 0 },
+  dbPoolExhaust: { active: false, clients: [] },
+  redisFlood: { active: false },
 };
 
 export async function chaosRoutes(app: FastifyInstance) {
@@ -105,14 +109,83 @@ export async function chaosRoutes(app: FastifyInstance) {
     return { status: 'active', delay_ms, duration_s };
   });
 
+  // Exhaust the DB connection pool - all subsequent queries timeout
+  app.post<{ Body: { duration_s: number } }>('/chaos/db-pool-exhaust', async (req) => {
+    const { duration_s } = req.body;
+    if (chaos.dbPoolExhaust.timer) clearTimeout(chaos.dbPoolExhaust.timer);
+
+    const span = tracer.startSpan('chaos.db_pool_exhaust');
+    const clients: unknown[] = [];
+    try {
+      for (let i = 0; i < 10; i++) {
+        const client = await pool.connect();
+        clients.push(client);
+      }
+    } catch {
+      // Pool may have fewer than 10 slots - that's fine
+    }
+    span.setAttribute('chaos.connections_held', clients.length);
+    span.end();
+
+    chaos.dbPoolExhaust = {
+      active: true,
+      clients,
+      timer: setTimeout(() => {
+        clients.forEach((c: any) => c.release());
+        chaos.dbPoolExhaust = { active: false, clients: [] };
+        app.log.info('Chaos: DB pool exhaust expired, connections released');
+      }, duration_s * 1000),
+    };
+
+    app.log.info({ connections_held: clients.length, duration_s }, 'Chaos: DB pool exhausted');
+    return { status: 'active', connections_held: clients.length, duration_s };
+  });
+
+  // Flood Redis pub/sub channels with noise - overwhelms notifications service
+  app.post<{ Body: { rate: number; duration_s: number } }>('/chaos/redis-flood', async (req) => {
+    const { rate, duration_s } = req.body;
+    if (chaos.redisFlood.interval) clearInterval(chaos.redisFlood.interval);
+    if (chaos.redisFlood.timer) clearTimeout(chaos.redisFlood.timer);
+
+    const interval = setInterval(() => {
+      for (let i = 0; i < rate; i++) {
+        redis.publish('f1:position-change', JSON.stringify({
+          event_type: 'position_change',
+          session_id: -1,
+          timestamp: new Date().toISOString(),
+          data: { driver_id: 0, driver_name: 'CHAOS_FLOOD', old_position: 0, new_position: 0 },
+        }));
+      }
+    }, 100);
+
+    chaos.redisFlood = {
+      active: true,
+      interval,
+      timer: setTimeout(() => {
+        clearInterval(interval);
+        chaos.redisFlood = { active: false };
+        app.log.info('Chaos: Redis flood expired');
+      }, duration_s * 1000),
+    };
+
+    app.log.info({ rate, duration_s }, 'Chaos: Redis pub/sub flood activated');
+    return { status: 'active', messages_per_100ms: rate, duration_s };
+  });
+
   app.delete('/chaos', async () => {
     if (chaos.latency.timer) clearTimeout(chaos.latency.timer);
     if (chaos.errors.timer) clearTimeout(chaos.errors.timer);
     if (chaos.dbSlow.timer) clearTimeout(chaos.dbSlow.timer);
+    if (chaos.dbPoolExhaust.timer) clearTimeout(chaos.dbPoolExhaust.timer);
+    chaos.dbPoolExhaust.clients.forEach((c: any) => c.release());
+    if (chaos.redisFlood.interval) clearInterval(chaos.redisFlood.interval);
+    if (chaos.redisFlood.timer) clearTimeout(chaos.redisFlood.timer);
     chaos.latency = { active: false, min_ms: 0, max_ms: 0 };
     chaos.errors = { active: false, rate: 0 };
     chaos.memoryLeak = { active: false, data: [] };
     chaos.dbSlow = { active: false, delay_ms: 0 };
+    chaos.dbPoolExhaust = { active: false, clients: [] };
+    chaos.redisFlood = { active: false };
     app.log.info('Chaos: all injections cleared');
     return { status: 'cleared' };
   });
@@ -122,5 +195,7 @@ export async function chaosRoutes(app: FastifyInstance) {
     errors: { active: chaos.errors.active, rate: chaos.errors.rate },
     memory_leak: { active: chaos.memoryLeak.active, entries: chaos.memoryLeak.data.length },
     db_slow: { active: chaos.dbSlow.active, delay_ms: chaos.dbSlow.delay_ms },
+    db_pool_exhaust: { active: chaos.dbPoolExhaust.active, connections_held: chaos.dbPoolExhaust.clients.length },
+    redis_flood: { active: chaos.redisFlood.active },
   }));
 }
