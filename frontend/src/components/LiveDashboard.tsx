@@ -5,8 +5,9 @@ import type { Position, Session, WSMessage } from '../types/f1';
 import LapTimeChart from './LapTimeChart';
 import PositionTracker from './PositionTracker';
 
-function formatGap(ms: number | null): string {
-  if (ms === null || ms === 0) return 'LEADER';
+function formatGap(ms: number | null, position: number): string {
+  if (position === 1) return 'LEADER';
+  if (ms === null || ms === 0) return '-';
   const seconds = ms / 1000;
   return `+${seconds.toFixed(3)}`;
 }
@@ -43,19 +44,31 @@ export default function LiveDashboard() {
         break;
       case 'lap_complete':
         setEvents((prev) => [
-          { type: 'lap', text: `Lap complete: ${formatLapTime(msg.data.time_ms)}`, time: now },
+          {
+            type: 'lap',
+            text: `${msg.data.abbreviation || 'Driver'} Lap ${msg.data.lap_number || ''}: ${formatLapTime(msg.data.time_ms)}`,
+            time: now,
+          },
           ...prev.slice(0, 49),
         ]);
         break;
       case 'pit_stop':
         setEvents((prev) => [
-          { type: 'pit', text: `Pit stop`, time: now },
+          {
+            type: 'pit',
+            text: `${msg.data.abbreviation || 'Driver'} PIT${msg.data.tire_new ? ` - ${msg.data.tire_new}` : ''}${msg.data.duration_ms ? ` (${(msg.data.duration_ms / 1000).toFixed(1)}s)` : ''}`,
+            time: now,
+          },
           ...prev.slice(0, 49),
         ]);
         break;
       case 'fastest_lap':
         setEvents((prev) => [
-          { type: 'fastest', text: `Fastest lap: ${formatLapTime(msg.data.time_ms)}`, time: now },
+          {
+            type: 'fastest',
+            text: `${msg.data.abbreviation || 'Driver'} FASTEST LAP: ${formatLapTime(msg.data.time_ms)}`,
+            time: now,
+          },
           ...prev.slice(0, 49),
         ]);
         break;
@@ -150,7 +163,7 @@ export default function LiveDashboard() {
                           </td>
                           <td className="py-2 px-4 text-gray-400">{String(row.team ?? '')}</td>
                           <td className="py-2 px-4 text-right font-mono text-gray-300">
-                            {formatGap(pos.gap_to_leader_ms)}
+                            {formatGap(pos.gap_to_leader_ms, pos.position)}
                           </td>
                           <td className="py-2 px-4 text-right font-mono text-gray-300">
                             {pos.interval_ms ? `+${(pos.interval_ms / 1000).toFixed(3)}` : '-'}

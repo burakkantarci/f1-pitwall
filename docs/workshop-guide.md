@@ -17,6 +17,8 @@ cd f1-pitwall
 ./k8s/deploy-minikube.sh
 
 # 3. Install Edge Delta agent
+#    Go to app.edgedelta.com > Connectors > Create Kubernetes connector
+#    Copy the API key from the install instructions
 ED_API_KEY=your-key-here ./k8s/edge-delta.sh
 
 # 4. Verify everything is running

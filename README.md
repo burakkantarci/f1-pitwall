@@ -9,9 +9,22 @@ A hands-on workshop where you deploy a real-time F1 race data platform on miniku
 - Use Edge Delta's agentic investigation threads to analyze and troubleshoot issues
 - Ask follow-up questions about operational signals instead of manually searching logs
 
+## About the App
+
+PitWall is a real-time Formula 1 race monitoring dashboard - a simplified version of what F1 engineering teams see on their pit wall screens during races. It pulls real data from the 2024 F1 season (24 races, 24 drivers including Verstappen, Norris, Leclerc, and more).
+
+**What you see in the browser:**
+
+- **Race Calendar** (home page) - The full 2024 F1 season with all races, circuits, and dates
+- **Live Dashboard** (`/live`) - The main screen. When a race replay is running, it shows a real-time position tower, live event feed (pit stops, fastest laps, overtakes), lap time charts, and a WebSocket connection indicator
+- **Driver Standings** (`/standings`) - Championship table with points and wins
+- **Admin Panel** (`/admin`) - Controls for starting race replays at 1x-50x speed and triggering chaos scenarios
+
+**How it works:** The ingestion service pulls historical F1 data and can replay races at accelerated speed. Events flow through Redis pub/sub to the notifications service and are streamed to the browser via WebSocket. All services emit structured JSON logs, making this an ideal app for demonstrating observability and agentic SRE workflows.
+
 ## Architecture
 
-PitWall is a 4-service F1 telemetry platform with PostgreSQL, Redis, and an OpenTelemetry collector:
+PitWall is a 4-service platform with PostgreSQL, Redis, and an OpenTelemetry collector:
 
 ```
                     +-----------+
@@ -61,7 +74,9 @@ cd f1-pitwall
 # Deploy to minikube (builds images, applies manifests, seeds data)
 ./k8s/deploy-minikube.sh
 
-# Install Edge Delta agent (get API key from https://app.edgedelta.com)
+# Install Edge Delta agent
+# Go to app.edgedelta.com > Connectors > Create Kubernetes connector
+# Copy the API key from the install instructions
 ED_API_KEY=your-key-here ./k8s/edge-delta.sh
 
 # Generate baseline traffic

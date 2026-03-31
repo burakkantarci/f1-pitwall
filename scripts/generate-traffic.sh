@@ -10,7 +10,8 @@ NC='\033[0m'
 
 ENDPOINTS=(
   "GET /api/health"
-  "GET /api/races"
+  "GET /api/seasons"
+  "GET /api/seasons/2024/races"
   "GET /api/drivers"
   "GET /api/live/session"
   "GET /api/live/positions"

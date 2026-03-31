@@ -23,9 +23,10 @@ helm repo update
 
 log "Installing Edge Delta agent..."
 helm upgrade edgedelta edgedelta/edgedelta -i \
+  --version 2.13.0 --reuse-values \
+  --set watcherProps.enabled=false \
   --set secretApiKey.value="$ED_API_KEY" \
-  --namespace edgedelta \
-  --create-namespace
+  -n edgedelta --create-namespace
 
 log "Waiting for Edge Delta agent to be ready..."
 kubectl wait --namespace edgedelta --for=condition=ready pod -l app.kubernetes.io/name=edgedelta --timeout=120s

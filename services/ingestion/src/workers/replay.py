@@ -71,45 +71,123 @@ async def start_replay(session_id: int, speed: float = 10.0):
             # Build a driver ID -> name map
             drivers = {d.id: d for d in db.query(Driver).all()}
 
+            # Compute race time range from positions
+            race_start = None
+            race_end = None
+            for pos in positions:
+                if pos.recorded_at:
+                    if race_start is None or pos.recorded_at < race_start:
+                        race_start = pos.recorded_at
+                    if race_end is None or pos.recorded_at > race_end:
+                        race_end = pos.recorded_at
+
+            race_duration = (race_end - race_start).total_seconds() if race_start and race_end else 3600
+
+            # Find max lap number to distribute laps across race duration
+            max_lap = max((lap.lap_number for lap in laps), default=1)
+
+            # Build a unified timeline of all events
+            events = []
+
+            for pos in positions:
+                driver = drivers.get(pos.driver_id)
+                events.append({
+                    "time": pos.recorded_at or race_start or datetime.min,
+                    "channel": CHANNELS["position"],
+                    "payload": {
+                        "event_type": "position_change",
+                        "session_id": session_id,
+                        "data": {
+                            "driver_id": pos.driver_id,
+                            "driver_name": driver.name if driver else "Unknown",
+                            "abbreviation": driver.abbreviation if driver else "",
+                            "team": driver.team if driver else "",
+                            "number": driver.number if driver else pos.driver_id,
+                            "position": pos.position,
+                            "gap_to_leader_ms": pos.gap_to_leader_ms,
+                            "interval_ms": pos.interval_ms,
+                            "last_lap_ms": pos.last_lap_ms if hasattr(pos, "last_lap_ms") else None,
+                        },
+                    },
+                })
+
+            # Distribute laps evenly across race duration based on lap number
+            from datetime import timedelta
+            for lap in laps:
+                driver = drivers.get(lap.driver_id)
+                frac = lap.lap_number / max_lap
+                lap_time = race_start + timedelta(seconds=race_duration * frac) if race_start else datetime.min
+                events.append({
+                    "time": lap_time,
+                    "channel": CHANNELS["lap"],
+                    "payload": {
+                        "event_type": "lap_complete",
+                        "session_id": session_id,
+                        "data": {
+                            "driver_id": lap.driver_id,
+                            "driver_name": driver.name if driver else "Unknown",
+                            "abbreviation": driver.abbreviation if driver else "",
+                            "lap_number": lap.lap_number,
+                            "time_ms": lap.time_ms,
+                            "position": lap.position,
+                            "compound": lap.compound,
+                        },
+                    },
+                })
+
+            # Distribute pit stops based on their lap number
+            for ps in pit_stops:
+                driver = drivers.get(ps.driver_id)
+                frac = ps.lap / max_lap
+                ps_time = race_start + timedelta(seconds=race_duration * frac) if race_start else datetime.min
+                events.append({
+                    "time": ps_time,
+                    "channel": CHANNELS["pit_stop"],
+                    "payload": {
+                        "event_type": "pit_stop",
+                        "session_id": session_id,
+                        "data": {
+                            "driver_id": ps.driver_id,
+                            "driver_name": driver.name if driver else "Unknown",
+                            "abbreviation": driver.abbreviation if driver else "",
+                            "lap": ps.lap,
+                            "duration_ms": ps.duration_ms,
+                            "tire_old": ps.tire_compound_old,
+                            "tire_new": ps.tire_compound_new,
+                        },
+                    },
+                })
+
+            events.sort(key=lambda e: e["time"])
+
             logger.info(
                 "Replay loaded",
                 session_id=session_id,
+                total_events=len(events),
                 positions=len(positions),
                 laps=len(laps),
                 pit_stops=len(pit_stops),
             )
 
-            # Replay positions with timing
+            # Replay all events with timing
             prev_time = None
-            for pos in positions:
+            for evt in events:
                 if not _running:
                     break
 
-                if prev_time and pos.recorded_at:
-                    delta = (pos.recorded_at - prev_time).total_seconds()
+                evt_time = evt["time"]
+                if prev_time and evt_time and evt_time != datetime.min:
+                    delta = (evt_time - prev_time).total_seconds()
                     wait = delta / speed
-                    if wait > 0:
+                    if 0 < wait < 30:
                         await asyncio.sleep(wait)
 
-                driver = drivers.get(pos.driver_id)
-                _redis.publish(
-                    CHANNELS["position"],
-                    json.dumps({
-                        "event_type": "position_change",
-                        "session_id": session_id,
-                        "timestamp": datetime.utcnow().isoformat(),
-                        "data": {
-                            "driver_id": pos.driver_id,
-                            "driver_name": driver.name if driver else "Unknown",
-                            "position": pos.position,
-                            "gap_to_leader_ms": pos.gap_to_leader_ms,
-                            "interval_ms": pos.interval_ms,
-                        },
-                    }),
-                )
+                payload = evt["payload"]
+                payload["timestamp"] = datetime.utcnow().isoformat()
+                _redis.publish(evt["channel"], json.dumps(payload))
 
-                if pos.recorded_at:
-                    prev_time = pos.recorded_at
+                if evt_time and evt_time != datetime.min:
+                    prev_time = evt_time
 
             # Publish session end
             _redis.publish(

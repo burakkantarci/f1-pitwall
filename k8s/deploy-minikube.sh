@@ -135,13 +135,39 @@ sleep 2
 
 curl -sf -X POST http://localhost:8000/sync/season/2024 || warn "Seed request failed - you can retry manually"
 
-# Poll until data appears (max 60s)
-log "Waiting for seed data..."
+# Poll until race data appears (max 60s)
+log "Waiting for season data..."
 for i in $(seq 1 30); do
   COUNT=$(kubectl exec -n "$NAMESPACE" statefulset/postgres -- \
     psql -U pitwall -d pitwall -t -c "SELECT COUNT(*) FROM races;" 2>/dev/null | tr -d ' ')
   if [ -n "$COUNT" ] && [ "$COUNT" -gt 0 ] 2>/dev/null; then
     log "Found $COUNT races in database."
+    break
+  fi
+  printf "."
+  sleep 2
+done
+echo ""
+
+# Sync Bahrain GP telemetry from OpenF1 (positions, laps, pit stops)
+log "Syncing Bahrain GP telemetry from OpenF1 API..."
+BAHRAIN_SESSION_KEY=9472
+
+# Update session with OpenF1 key
+kubectl exec -n "$NAMESPACE" statefulset/postgres -- \
+  psql -U pitwall -d pitwall -c \
+  "UPDATE sessions SET external_id = 'openf1-${BAHRAIN_SESSION_KEY}' WHERE id = 1;" >/dev/null 2>&1
+
+# Trigger telemetry sync
+curl -sf -X POST "http://localhost:8000/sync/openf1/session/${BAHRAIN_SESSION_KEY}" || warn "OpenF1 sync failed - you can retry manually"
+
+# Poll until positions appear (max 60s)
+log "Waiting for telemetry data..."
+for i in $(seq 1 30); do
+  POS_COUNT=$(kubectl exec -n "$NAMESPACE" statefulset/postgres -- \
+    psql -U pitwall -d pitwall -t -c "SELECT COUNT(*) FROM positions;" 2>/dev/null | tr -d ' ')
+  if [ -n "$POS_COUNT" ] && [ "$POS_COUNT" -gt 0 ] 2>/dev/null; then
+    log "Synced $POS_COUNT position records."
     break
   fi
   printf "."
