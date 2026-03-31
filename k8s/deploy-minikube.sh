@@ -69,6 +69,7 @@ log "Creating namespace and config..."
 kubectl apply -f "$SCRIPT_DIR/namespace.yml"
 kubectl apply -f "$SCRIPT_DIR/configmap.yml"
 kubectl apply -f "$SCRIPT_DIR/secrets.yml"
+kubectl apply -f "$SCRIPT_DIR/rbac.yml"
 
 # -------------------------------------------------------------------
 # Step 4: Deploy PostgreSQL and wait

@@ -1,0 +1,29 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: api-sa
+  namespace: pitwall
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: api-chaos-role
+  namespace: pitwall
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments/scale", "statefulsets/scale"]
+    verbs: ["get", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: api-chaos-binding
+  namespace: pitwall
+subjects:
+  - kind: ServiceAccount
+    name: api-sa
+    namespace: pitwall
+roleRef:
+  kind: Role
+  name: api-chaos-role
+  apiGroup: rbac.authorization.k8s.io

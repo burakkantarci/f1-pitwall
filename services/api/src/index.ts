@@ -8,6 +8,7 @@ import { driversRoutes } from './routes/drivers.js';
 import { sessionsRoutes } from './routes/sessions.js';
 import { liveRoutes } from './routes/live.js';
 import { chaosRoutes } from './routes/chaos.js';
+import { k8sChaosRoutes } from './routes/k8s-chaos.js';
 import { wsHandler } from './websocket/handler.js';
 
 const app = Fastify({
@@ -31,6 +32,7 @@ await app.register(driversRoutes, { prefix: '/api' });
 await app.register(sessionsRoutes, { prefix: '/api' });
 await app.register(liveRoutes, { prefix: '/api' });
 await app.register(chaosRoutes, { prefix: '/api' });
+await app.register(k8sChaosRoutes, { prefix: '/api' });
 
 // Admin - replay proxy to ingestion service
 app.post<{ Body: { session_id: number; speed: number } }>('/api/admin/replay', async (req) => {

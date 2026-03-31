@@ -2,8 +2,13 @@ import { useState, useEffect } from 'react';
 import { api } from '../api/client';
 import type { ChaosStatus } from '../types/f1';
 
+interface InfraStatus {
+  [key: string]: { desired: number; ready: number };
+}
+
 export default function AdminPanel() {
   const [chaosStatus, setChaosStatus] = useState<ChaosStatus | null>(null);
+  const [infraStatus, setInfraStatus] = useState<InfraStatus | null>(null);
   const [replaySessionId, setReplaySessionId] = useState('1');
   const [replaySpeed, setReplaySpeed] = useState('10');
   const [message, setMessage] = useState('');
@@ -11,6 +16,9 @@ export default function AdminPanel() {
   const refreshStatus = () => {
     api.getChaosStatus()
       .then(setChaosStatus)
+      .catch(() => {});
+    api.infraStatus()
+      .then(setInfraStatus)
       .catch(() => {});
   };
 
@@ -190,6 +198,137 @@ export default function AdminPanel() {
                 </button>
               </div>
             ))}
+          </div>
+        </div>
+
+        {/* Infrastructure Chaos */}
+        <div className="lg:col-span-2 bg-gray-900 border border-gray-800 rounded-lg p-4">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="font-semibold">Infrastructure Chaos</h3>
+            <button
+              onClick={() =>
+                api.infraMeltdownRestore().then(() => {
+                  showMsg('All infrastructure restored');
+                  refreshStatus();
+                }).catch((e: Error) => showMsg(`Error: ${e.message}`))
+              }
+              className="bg-green-700 hover:bg-green-600 px-3 py-1 rounded text-xs font-medium"
+            >
+              Restore All
+            </button>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {[
+              {
+                label: 'Redis',
+                key: 'redis',
+                description: 'Kill Redis - breaks WebSocket, caching, pub/sub across all services',
+                kill: () => api.infraRedisKill(),
+                restore: () => api.infraRedisRestore(),
+              },
+              {
+                label: 'PostgreSQL',
+                key: 'postgres',
+                description: 'Kill database - all DB queries fail across API and ingestion',
+                kill: () => api.infraDbKill(),
+                restore: () => api.infraDbRestore(),
+              },
+              {
+                label: 'Ingestion',
+                key: 'ingestion',
+                description: 'Kill ingestion service - replay stops, no data sync',
+                kill: () => api.infraIngestionKill(),
+                restore: () => api.infraIngestionRestore(),
+              },
+              {
+                label: 'Notifications',
+                key: 'notifications',
+                description: 'Kill notifications service - event relay stops',
+                kill: () => api.infraNotificationsKill(),
+                restore: () => api.infraNotificationsRestore(),
+              },
+            ].map((svc) => {
+              const status = infraStatus?.[svc.key];
+              const isDown = status?.desired === 0;
+              return (
+                <div
+                  key={svc.key}
+                  className="flex items-center justify-between bg-gray-800/50 rounded px-3 py-2"
+                >
+                  <div>
+                    <div className="text-sm font-medium flex items-center gap-2">
+                      {svc.label}
+                      {status && (
+                        <span
+                          className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs ${
+                            isDown
+                              ? 'bg-red-900/50 text-red-400'
+                              : 'bg-green-900/50 text-green-400'
+                          }`}
+                        >
+                          {isDown ? 'DOWN' : 'UP'}
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-xs text-gray-500">{svc.description}</div>
+                  </div>
+                  <div className="flex gap-1 shrink-0">
+                    <button
+                      onClick={() =>
+                        svc
+                          .kill()
+                          .then(() => {
+                            showMsg(`${svc.label} killed`);
+                            refreshStatus();
+                          })
+                          .catch((e: Error) => showMsg(`Error: ${e.message}`))
+                      }
+                      className="bg-red-700 hover:bg-red-600 px-3 py-1 rounded text-xs font-medium"
+                    >
+                      Kill
+                    </button>
+                    <button
+                      onClick={() =>
+                        svc
+                          .restore()
+                          .then(() => {
+                            showMsg(`${svc.label} restored`);
+                            refreshStatus();
+                          })
+                          .catch((e: Error) => showMsg(`Error: ${e.message}`))
+                      }
+                      className="bg-green-700 hover:bg-green-600 px-3 py-1 rounded text-xs font-medium"
+                    >
+                      Restore
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <div className="mt-3 flex gap-2">
+            <button
+              onClick={() =>
+                api.infraMeltdown().then(() => {
+                  showMsg('MELTDOWN: PostgreSQL, Redis, Ingestion killed');
+                  refreshStatus();
+                }).catch((e: Error) => showMsg(`Error: ${e.message}`))
+              }
+              className="bg-red-900 hover:bg-red-800 border border-red-700 px-4 py-2 rounded text-sm font-medium"
+            >
+              MELTDOWN
+            </button>
+            <button
+              onClick={() =>
+                api.infraMeltdownRestore().then(() => {
+                  showMsg('All infrastructure restored');
+                  refreshStatus();
+                }).catch((e: Error) => showMsg(`Error: ${e.message}`))
+              }
+              className="bg-green-900 hover:bg-green-800 border border-green-700 px-4 py-2 rounded text-sm font-medium"
+            >
+              RESTORE ALL
+            </button>
           </div>
         </div>
 
