@@ -179,19 +179,33 @@ echo ""
 kill $PF_PID 2>/dev/null || true
 
 # -------------------------------------------------------------------
+# Step 11: Start port-forwarding
+# -------------------------------------------------------------------
+# Kill any existing port-forwards on these ports from a previous run
+lsof -ti:5173 2>/dev/null | xargs kill 2>/dev/null || true
+lsof -ti:3001 2>/dev/null | xargs kill 2>/dev/null || true
+sleep 1
+
+log "Starting port-forwarding..."
+nohup kubectl port-forward -n "$NAMESPACE" svc/frontend 5173:5173 &>/dev/null &
+nohup kubectl port-forward -n "$NAMESPACE" svc/api 3001:3001 &>/dev/null &
+sleep 2
+
+# Verify port-forwarding is working
+if curl -sf -o /dev/null http://localhost:5173 2>/dev/null; then
+  log "Frontend is accessible at http://localhost:5173"
+else
+  warn "Frontend port-forward may not be ready yet - try http://localhost:5173 in a few seconds"
+fi
+
+# -------------------------------------------------------------------
 # Done
 # -------------------------------------------------------------------
 echo ""
 log "PitWall is running on minikube!"
 echo ""
-
-API_URL=$(minikube service api -n "$NAMESPACE" --url 2>/dev/null || echo "http://localhost:3001")
-FRONTEND_URL=$(minikube service frontend -n "$NAMESPACE" --url 2>/dev/null || echo "http://localhost:5173")
-INGESTION_URL=$(minikube service ingestion -n "$NAMESPACE" --url 2>/dev/null || echo "http://localhost:8000")
-
-echo "  Frontend:   $FRONTEND_URL"
-echo "  API:        $API_URL"
-echo "  Ingestion:  $INGESTION_URL"
+echo "  Frontend:   http://localhost:5173"
+echo "  API:        http://localhost:3001"
 echo ""
 echo "  kubectl get pods -n pitwall"
 echo ""
