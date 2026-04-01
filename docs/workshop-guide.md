@@ -10,7 +10,7 @@ Run this **before** the workshop starts (takes ~5 minutes):
 
 ```bash
 # 1. Clone the repo
-git clone https://github.com/emrahssamdan-edge/f1-pitwall.git
+git clone https://github.com/burakkantarci/f1-pitwall.git
 cd f1-pitwall
 
 # 2. Deploy to minikube

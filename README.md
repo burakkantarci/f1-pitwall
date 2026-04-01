@@ -68,7 +68,7 @@ No prior experience with AI-driven or agentic systems is required.
 
 ```bash
 # Clone and deploy
-git clone https://github.com/emrahssamdan-edge/f1-pitwall.git
+git clone https://github.com/burakkantarci/f1-pitwall.git
 cd f1-pitwall
 
 # Deploy to minikube (builds images, applies manifests, seeds data)
