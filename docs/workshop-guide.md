@@ -39,7 +39,7 @@ kubectl port-forward -n pitwall svc/api 3001:3001 &
 kubectl port-forward -n pitwall svc/frontend 5173:5173 &
 ```
 
-Open the frontend in your browser and verify the dashboard loads.
+Open the frontend in your browser at [http://localhost:5173](http://localhost:5173) and verify the dashboard loads. The API runs at [http://localhost:3001](http://localhost:3001).
 
 ### Start traffic generation
 
